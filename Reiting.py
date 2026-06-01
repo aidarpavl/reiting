@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # ⚠️ GitHub-тағы reiting.xlsx файлының RAW URL-ін қойыңыз ⚠️
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/СІЗДІҢ_АККАУНТЫҢЫЗ/СІЗДІҢ_РЕПОЗИТОРИЙІҢІЗ/main/reiting.xlsx"
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting.xlsx"
 
 # ==================== ДЕМО-ДЕРЕКТЕР (кестедегі мәліметтер) ====================
 DEMO_DATA = {
