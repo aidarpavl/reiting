@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 import requests
-from urllib.parse import urlparse
 
 # ==================== КОНФИГУРАЦИЯ ====================
 st.set_page_config(
@@ -13,10 +12,189 @@ st.set_page_config(
     layout="wide"
 )
 
-# GitHub-тағы Excel файлының RAW URL-і (ӨЗІҢІЗДІҢ URL-ІҢІЗБЕН АУЫСТЫРЫҢЫЗ)
+# GitHub-тағы Excel файлының RAW URL-і
 GITHUB_EXCEL_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting.xlsx"
 
-# Демо деректер (кестедегі ақпарат бойынша)
+# ==================== ДЕРЕКТЕРДІ ОҚУ ФУНКЦИЯСЫ ====================
+@st.cache_data(ttl=300)
+def load_data():
+    """GitHub-тан Excel файлын оқып, мұғалімдер деректерін қайтару"""
+    try:
+        response = requests.get(GITHUB_EXCEL_URL, timeout=30)
+        if response.status_code == 200:
+            excel_data = BytesIO(response.content)
+            
+            # Барлық парақтарды оқу
+            xl = pd.ExcelFile(excel_data)
+            st.sidebar.info(f"📑 Парақтар: {', '.join(xl.sheet_names)}")
+            
+            # "Kl ruk" парағын оқу (мұғалімдер деректері)
+            if "Kl ruk" in xl.sheet_names:
+                df_raw = pd.read_excel(excel_data, sheet_name="Kl ruk", header=None)
+                return parse_kl_ruk_sheet(df_raw)
+            else:
+                st.error("'Kl ruk' парағы табылмады")
+                return None
+        else:
+            st.error(f"GitHub-тан оқу мүмкін болмады (статус: {response.status_code})")
+            return None
+    except Exception as e:
+        st.error(f"Қате: {str(e)}")
+        return None
+
+def parse_kl_ruk_sheet(df_raw):
+    """Kl ruk парағын парсингтеу - мұғалімдер деректерін алу"""
+    teachers = []
+    
+    # Деректер 4-ші жолдан басталады (индекс 3)
+    # Бағандар: A=№, B=ФИО, C=Предмет, D=Коэф, E=Орг.демалыс, F=Вед.рейтинг, 
+    # G=Флеш-моб, H=Внекл.мероп, I=Дежурство, J=Итог (формула), K-?...
+    
+    for idx in range(3, len(df_raw)):
+        row = df_raw.iloc[idx]
+        
+        # ФИО бар жолдарды анықтау
+        fio = row[1] if pd.notna(row[1]) else None
+        if not fio or str(fio).strip() == '':
+            continue
+        
+        # Негізгі деректерді алу
+        subject = row[2] if pd.notna(row[2]) else "Пән"
+        coef = float(row[3]) if pd.notna(row[3]) else 1.0
+        
+        # Внеклассная работа (бағандар E, F, G, H, I)
+        org = float(row[4]) if pd.notna(row[4]) else 0
+        rating = float(row[5]) if pd.notna(row[5]) else 0
+        flash = float(row[6]) if pd.notna(row[6]) else 0
+        vnekl = float(row[7]) if pd.notna(row[7]) else 0
+        desh = float(row[8]) if pd.notna(row[8]) else 0
+        
+        # Методическая деятельность (K, L, M, N, O, P, Q бағандары)
+        gor = float(row[10]) if len(row) > 10 and pd.notna(row[10]) else 0
+        obl = float(row[11]) if len(row) > 11 and pd.notna(row[11]) else 0
+        resp = float(row[12]) if len(row) > 12 and pd.notna(row[12]) else 0
+        vneklMero = float(row[13]) if len(row) > 13 and pd.notna(row[13]) else 0
+        smi = float(row[14]) if len(row) > 14 and pd.notna(row[14]) else 0
+        obob = float(row[15]) if len(row) > 15 and pd.notna(row[15]) else 0
+        publ = float(row[16]) if len(row) > 16 and pd.notna(row[16]) else 0
+        
+        # Рейтинг у администрации (S, T, U, V, W, X бағандары)
+        otchet = float(row[18]) if len(row) > 18 and pd.notna(row[18]) else 0
+        posesh = float(row[19]) if len(row) > 19 and pd.notna(row[19]) else 0
+        ugalok = float(row[20]) if len(row) > 20 and pd.notna(row[20]) else 0
+        pdd = float(row[21]) if len(row) > 21 and pd.notna(row[21]) else 0
+        pitanie = float(row[22]) if len(row) > 22 and pd.notna(row[22]) else 0
+        zhurnal = float(row[23]) if len(row) > 23 and pd.notna(row[23]) else 0
+        
+        teachers.append({
+            "ФИО": str(fio).strip(),
+            "Предмет": str(subject).strip(),
+            "Коэф": coef,
+            "Орг.демалыс": org,
+            "Вед.рейтинг": rating,
+            "Флеш-моб": flash,
+            "Внекл.мероп": vnekl,
+            "Дежурство": desh,
+            "Конк(гор)": gor,
+            "Конк(обл)": obl,
+            "Конк(респ)": resp,
+            "Внекл.мероп2": vneklMero,
+            "СМИ": smi,
+            "Обобщ.опыт": obob,
+            "Публикац": publ,
+            "Сдача отчетов": otchet,
+            "Посещаемость": posesh,
+            "Кл.уголок": ugalok,
+            "ПДД": pdd,
+            "Питание": pitanie,
+            "Журнал": zhurnal,
+        })
+    
+    if teachers:
+        df = pd.DataFrame(teachers)
+        return df
+    return None
+
+# ==================== ЕСЕПТЕУ ФУНКЦИЯЛАРЫ ====================
+def calculate_extracurricular(row):
+    return (row.get('Орг.демалыс', 0) + row.get('Вед.рейтинг', 0) + 
+            row.get('Флеш-моб', 0) + row.get('Внекл.мероп', 0) + row.get('Дежурство', 0))
+
+def calculate_methodical(row):
+    return (row.get('Конк(гор)', 0) + row.get('Конк(обл)', 0) + row.get('Конк(респ)', 0) + 
+            row.get('Внекл.мероп2', 0) + row.get('СМИ', 0) + row.get('Обобщ.опыт', 0) + row.get('Публикац', 0))
+
+def calculate_admin(row):
+    return (row.get('Сдача отчетов', 0) + row.get('Посещаемость', 0) + row.get('Кл.уголок', 0) + 
+            row.get('ПДД', 0) + row.get('Питание', 0) + row.get('Журнал', 0))
+
+def process_data(df):
+    df = df.copy()
+    df['Внекл итог'] = df.apply(calculate_extracurricular, axis=1)
+    df['Метод итог'] = df.apply(calculate_methodical, axis=1)
+    df['Админ итог'] = df.apply(calculate_admin, axis=1)
+    df['Жалпы итог'] = df['Внекл итог'] + df['Метод итог'] + df['Админ итог']
+    return df
+
+def calculate_percentages(df):
+    min_score = df['Жалпы итог'].min()
+    max_score = df['Жалпы итог'].max()
+    range_score = max_score - min_score
+    if range_score == 0:
+        df['Пайыз (%)'] = 100.0
+    else:
+        df['Пайыз (%)'] = ((df['Жалпы итог'] - min_score) / range_score) * 100
+    return df
+
+# ==================== ИНТЕРФЕЙС ====================
+st.title("📊 Мұғалімдердің кешенді рейтингі")
+st.caption("Өрлеу бағдарламасы бойынша - Класс жетекшілерді бағалау жүйесі")
+
+# Бүйірлік панель
+with st.sidebar:
+    st.header("⚙️ Басқару")
+    
+    # URL өзгерту
+    github_url = st.text_input("GitHub Excel URL:", value=GITHUB_EXCEL_URL)
+    if github_url != GITHUB_EXCEL_URL:
+        GITHUB_EXCEL_URL = github_url
+        st.cache_data.clear()
+    
+    if st.button("🔄 Деректерді жүктеу", use_container_width=True):
+        with st.spinner("Деректер жүктелуде..."):
+            df = load_data()
+            if df is not None and not df.empty:
+                st.session_state.df = process_data(df)
+                st.session_state.data_source = "GitHub"
+                st.success(f"✅ {len(df)} мұғалім жүктелді!")
+                st.rerun()
+    
+    # Демо-деректер
+    if st.button("📋 Демо-деректерді пайдалану", use_container_width=True):
+        st.session_state.use_demo = True
+        st.rerun()
+    
+    st.markdown("---")
+    
+    if st.button("📈 Пайыздарды есептеу", use_container_width=True):
+        if 'df' in st.session_state:
+            st.session_state.df = calculate_percentages(st.session_state.df)
+            st.success("✅ Пайыздар есептелді!")
+            st.rerun()
+    
+    if st.button("📎 Excel сақтау", use_container_width=True):
+        if 'df' in st.session_state:
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                st.session_state.df.to_excel(writer, index=False, sheet_name='Мұғалімдер рейтингі')
+            st.download_button(
+                label="📥 Жүктеп алу",
+                data=output.getvalue(),
+                file_name=f"teacher_rating_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+# Демо-деректер (кестедегі мәліметтер бойынша)
 DEMO_DATA = {
     "ФИО": ["АХШАЛОВА", "АЗЫМБАЕВА", "АЙТБАЙ", "АЛЬМЕНОВА", "АЛЬНАЗИРОВА", 
              "АРЫНГАЗИНА", "ИЛЬЯСОВА", "ИТЕМГЕНОВ", "КАБЫЛОВА", "КАЗАНГАПОВ", 
@@ -45,134 +223,15 @@ DEMO_DATA = {
     "Журнал": [3, 2, 3, 1, 4, 5, 2, 1, 2, 1, 1, 1, 2]
 }
 
-# ==================== ЕСЕПТЕУ ФУНКЦИЯЛАРЫ ====================
-def calculate_extracurricular(row):
-    """Внеклассная работа итогын есептеу"""
-    return (row.get('Орг.демалыс', 0) + row.get('Вед.рейтинг', 0) + 
-            row.get('Флеш-моб', 0) + row.get('Внекл.мероп', 0) + row.get('Дежурство', 0))
-
-def calculate_methodical(row):
-    """Методическая деятельность итогын есептеу"""
-    return (row.get('Конк(гор)', 0) + row.get('Конк(обл)', 0) + row.get('Конк(респ)', 0) + 
-            row.get('Внекл.мероп2', 0) + row.get('СМИ', 0) + row.get('Обобщ.опыт', 0) + row.get('Публикац', 0))
-
-def calculate_admin(row):
-    """Администрация итогын есептеу"""
-    return (row.get('Сдача отчетов', 0) + row.get('Посещаемость', 0) + row.get('Кл.уголок', 0) + 
-            row.get('ПДД', 0) + row.get('Питание', 0) + row.get('Журнал', 0))
-
-def calculate_total(row):
-    """Жалпы итогты есептеу"""
-    return calculate_extracurricular(row) + calculate_methodical(row) + calculate_admin(row)
-
-def process_data(df):
-    """Деректерді өңдеу және қосымша бағандар қосу"""
-    df = df.copy()
-    df['Внекл итог'] = df.apply(calculate_extracurricular, axis=1)
-    df['Метод итог'] = df.apply(calculate_methodical, axis=1)
-    df['Админ итог'] = df.apply(calculate_admin, axis=1)
-    df['Жалпы итог'] = df.apply(calculate_total, axis=1)
-    return df
-
-def calculate_percentages(df):
-    """Пайыздарды есептеу"""
-    min_score = df['Жалпы итог'].min()
-    max_score = df['Жалпы итог'].max()
-    range_score = max_score - min_score
-    
-    if range_score == 0:
-        df['Пайыз (%)'] = 100.0
-    else:
-        df['Пайыз (%)'] = ((df['Жалпы итог'] - min_score) / range_score) * 100
-    return df
-
-# ==================== GITHUB-ТАН EXCEL ОҚУ ====================
-@st.cache_data(ttl=300)
-def load_from_github():
-    """GitHub-тан Excel файлын оқу"""
-    try:
-        response = requests.get(GITHUB_EXCEL_URL, timeout=30)
-        if response.status_code == 200:
-            excel_data = BytesIO(response.content)
-            df = pd.read_excel(excel_data, engine='openpyxl')
-            return df
-        else:
-            st.warning(f"GitHub-тан оқу мүмкін болмады (статус: {response.status_code})")
-            return None
-    except Exception as e:
-        st.error(f"Қате: {str(e)}")
-        return None
-
-# ==================== ИНТЕРФЕЙС ====================
-st.title("📊 Мұғалімдердің кешенді рейтингі")
-st.caption("Өрлеу бағдарламасы бойынша - Класс жетекшілерді бағалау жүйесі")
-
-# Бүйірлік панель - басқару
-with st.sidebar:
-    st.header("⚙️ Басқару панелі")
-    
-    # GitHub URL-ді өзгерту мүмкіндігі
-    github_url = st.text_input("GitHub Excel URL:", value=GITHUB_EXCEL_URL)
-    if github_url != GITHUB_EXCEL_URL:
-        GITHUB_EXCEL_URL = github_url
-        st.cache_data.clear()
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 GitHub-тан оқу", use_container_width=True):
-            with st.spinner("Деректер жүктелуде..."):
-                df = load_from_github()
-                if df is not None and not df.empty:
-                    # Баған атауларын стандарттау
-                    df.columns = [col.strip() for col in df.columns]
-                    st.session_state.df = process_data(df)
-                    st.session_state.data_source = "GitHub"
-                    st.success(f"✅ {len(df)} мұғалім GitHub-тан жүктелді!")
-                    st.rerun()
-                else:
-                    st.error("GitHub-тан оқу мүмкін болмады. Демо-деректер қолданылуда.")
-                    st.session_state.df = pd.DataFrame(DEMO_DATA)
-                    st.session_state.df = process_data(st.session_state.df)
-                    st.session_state.data_source = "Demo"
-    
-    with col2:
-        if st.button("📋 Демо-деректер", use_container_width=True):
-            st.session_state.df = pd.DataFrame(DEMO_DATA)
-            st.session_state.df = process_data(st.session_state.df)
-            st.session_state.data_source = "Demo"
-            st.success("✅ Демо-деректер жүктелді!")
-            st.rerun()
-    
-    st.markdown("---")
-    
-    if st.button("📈 Пайыздарды есептеу", use_container_width=True):
-        if 'df' in st.session_state:
-            st.session_state.df = calculate_percentages(st.session_state.df)
-            st.success("✅ Пайыздар есептелді!")
-            st.rerun()
-    
-    if st.button("📎 Excel сақтау", use_container_width=True):
-        if 'df' in st.session_state:
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                st.session_state.df.to_excel(writer, index=False, sheet_name='Мұғалімдер рейтингі')
-            st.download_button(
-                label="📥 Excel жүктеп алу",
-                data=output.getvalue(),
-                file_name=f"teacher_rating_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    
-    st.markdown("---")
-    st.caption(f"📌 Деректер көзі: {st.session_state.get('data_source', 'Жүктелмеген')}")
-
-# Негізгі контент
+# Бастапқы деректер
 if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame(DEMO_DATA)
     st.session_state.df = process_data(st.session_state.df)
     st.session_state.data_source = "Demo"
+    st.session_state.use_demo = True
+
+# Бүйірлік панельде деректер көзін көрсету
+st.sidebar.info(f"📌 Деректер көзі: {st.session_state.get('data_source', 'Белгісіз')}")
 
 # Іздеу
 search = st.text_input("🔍 Мұғалім іздеу (аты/пәні бойынша)", placeholder="Атын немесе пәнін жазыңыз...")
@@ -187,8 +246,6 @@ st.info(f"👩‍🏫 Барлығы: **{len(filtered_df)}** мұғалім | Д
 
 # Негізгі кесте
 st.subheader("📋 Мұғалімдер кестесі")
-
-# Көрсетілетін бағандар
 display_columns = ['ФИО', 'Предмет', 'Коэф', 'Внекл итог', 'Метод итог', 'Админ итог', 'Жалпы итог']
 if 'Пайыз (%)' in filtered_df.columns:
     display_columns.append('Пайыз (%)')
@@ -196,7 +253,7 @@ if 'Пайыз (%)' in filtered_df.columns:
 st.dataframe(
     filtered_df[display_columns],
     use_container_width=True,
-    height=450,
+    height=400,
     column_config={
         "ФИО": st.column_config.TextColumn("ФИО", width="medium"),
         "Предмет": st.column_config.TextColumn("Предмет", width="small"),
@@ -244,37 +301,20 @@ with col2:
 # График
 st.subheader("📊 Мұғалімдердің жалпы итогтары")
 
-tab1, tab2 = st.tabs(["📊 Бағандық диаграмма", "📈 Сызықтық диаграмма"])
-
-with tab1:
-    fig = px.bar(
-        filtered_df,
-        x='ФИО',
-        y='Жалпы итог',
-        color='Жалпы итог',
-        color_continuous_scale=['#e74c3c', '#f39c12', '#27ae60'],
-        title="Мұғалімдердің рейтингі",
-        labels={'ФИО': 'Мұғалім', 'Жалпы итог': 'Жалпы итог (балл)'},
-        text='Жалпы итог',
-        height=500
-    )
-    fig.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-    fig.update_layout(showlegend=False, plot_bgcolor='white')
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    fig_line = px.line(
-        filtered_df,
-        x='ФИО',
-        y='Жалпы итог',
-        markers=True,
-        title="Мұғалімдер рейтингі (тренд)",
-        labels={'ФИО': 'Мұғалім', 'Жалпы итог': 'Жалпы итог (балл)'},
-        height=500
-    )
-    fig_line.update_traces(line_color='#667eea', marker=dict(size=10, color='#764ba2'))
-    fig_line.update_layout(plot_bgcolor='white')
-    st.plotly_chart(fig_line, use_container_width=True)
+fig = px.bar(
+    filtered_df,
+    x='ФИО',
+    y='Жалпы итог',
+    color='Жалпы итог',
+    color_continuous_scale=['#e74c3c', '#f39c12', '#27ae60'],
+    title="Мұғалімдердің рейтингі",
+    labels={'ФИО': 'Мұғалім', 'Жалпы итог': 'Жалпы итог (балл)'},
+    text='Жалпы итог',
+    height=500
+)
+fig.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+fig.update_layout(showlegend=False, plot_bgcolor='white')
+st.plotly_chart(fig, use_container_width=True)
 
 # Статистика
 st.subheader("📈 Статистикалық мәліметтер")
@@ -282,11 +322,9 @@ stat_cols = st.columns(4)
 with stat_cols[0]:
     st.metric("📊 Орташа итог", f"{filtered_df['Жалпы итог'].mean():.1f}")
 with stat_cols[1]:
-    st.metric("🏆 Ең жоғары көрсеткіш", f"{filtered_df['Жалпы итог'].max():.1f}", 
-              delta=f"+{filtered_df['Жалпы итог'].max() - filtered_df['Жалпы итог'].mean():.1f}")
+    st.metric("🏆 Ең жоғары көрсеткіш", f"{filtered_df['Жалпы итог'].max():.1f}")
 with stat_cols[2]:
-    st.metric("⚠️ Ең төмен көрсеткіш", f"{filtered_df['Жалпы итог'].min():.1f}",
-              delta=f"{filtered_df['Жалпы итог'].min() - filtered_df['Жалпы итог'].mean():.1f}")
+    st.metric("⚠️ Ең төмен көрсеткіш", f"{filtered_df['Жалпы итог'].min():.1f}")
 with stat_cols[3]:
     positive = len(filtered_df[filtered_df['Жалпы итог'] > 0])
     st.metric("✅ Оң нәтижелілер", f"{positive}/{len(filtered_df)}")
@@ -305,72 +343,12 @@ with st.expander("📋 Көмек шараларын көру", expanded=True):
         "📝 Портфолио жүргізу және жетістіктерді тіркеу",
         "🎯 Әдістемелік көмек көрсету үшін тәлімгер тағайындау",
     ]
-    
     with help_cols[0]:
         for item in help_items_left:
             st.write(f"- {item}")
     with help_cols[1]:
         for item in help_items_right:
             st.write(f"- {item}")
-
-# Мұғалімдерді басқару
-st.subheader("✏️ Мұғалімдерді басқару")
-
-tab_edit, tab_add, tab_delete = st.tabs(["📝 Өңдеу", "➕ Қосу", "🗑 Өшіру"])
-
-with tab_edit:
-    st.info("Кестедегі мәндерді тікелей өңдеуге болады. Жоғарыдағы кестедегі ұяшықтарды екі рет басыңыз.")
-    
-with tab_add:
-    with st.form("add_teacher_form"):
-        st.subheader("Жаңа мұғалім мәліметтері")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            new_fio = st.text_input("ФИО *", placeholder="Тегі Аты")
-            new_subject = st.selectbox("Предмет *", ["Математика", "Қазақ тілі", "Орыс тілі", "Ағылшын тілі", "Физика", "Химия", "Биология", "Тарих", "География", "Информатика"])
-            new_coef = st.number_input("Коэффицент", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
-        
-        with col_b:
-            new_class = st.text_input("Сынып", placeholder="7А, 8Б...")
-            new_exp = st.number_input("Жұмыс өтілі", min_value=0, max_value=40, value=5)
-        
-        st.subheader("Внеклассная работа (1-5 балл)")
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            new_org = st.number_input("Орг.демалыс", min_value=0, max_value=5, value=0)
-        with col2:
-            new_rating = st.number_input("Вед.рейтинг", min_value=0, max_value=5, value=0)
-        with col3:
-            new_flash = st.number_input("Флеш-моб", min_value=0, max_value=5, value=0)
-        with col4:
-            new_vnekl = st.number_input("Внекл.мероп", min_value=0, max_value=5, value=0)
-        with col5:
-            new_desh = st.number_input("Дежурство", min_value=0, max_value=5, value=0)
-        
-        if st.form_submit_button("➕ Мұғалімді қосу", use_container_width=True):
-            if new_fio:
-                new_row = pd.DataFrame([{
-                    'ФИО': new_fio, 'Предмет': new_subject, 'Коэф': new_coef,
-                    'Орг.демалыс': new_org, 'Вед.рейтинг': new_rating, 'Флеш-моб': new_flash,
-                    'Внекл.мероп': new_vnekl, 'Дежурство': new_desh,
-                    'Конк(гор)': 0, 'Конк(обл)': 0, 'Конк(респ)': 0, 'Внекл.мероп2': 0,
-                    'СМИ': 0, 'Обобщ.опыт': 0, 'Публикац': 0, 'Сдача отчетов': 0,
-                    'Посещаемость': 0, 'Кл.уголок': 0, 'ПДД': 0, 'Питание': 0, 'Журнал': 0
-                }])
-                st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                st.session_state.df = process_data(st.session_state.df)
-                st.success(f"✅ {new_fio} мұғалімі қосылды!")
-                st.rerun()
-            else:
-                st.error("ФИО толтырыңыз!")
-
-with tab_delete:
-    teacher_to_delete = st.selectbox("Өшіретін мұғалімді таңдаңыз:", [''] + list(st.session_state.df['ФИО'].unique()))
-    if teacher_to_delete and st.button("🗑 Мұғалімді өшіру", type="secondary"):
-        st.session_state.df = st.session_state.df[st.session_state.df['ФИО'] != teacher_to_delete]
-        st.session_state.df = process_data(st.session_state.df)
-        st.success(f"✅ {teacher_to_delete} мұғалімі өшірілді!")
-        st.rerun()
 
 # Footer
 st.markdown("---")
