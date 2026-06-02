@@ -18,21 +18,17 @@ st.set_page_config(
 # ==================== СЕССИЯ КҮЙІН ИНИЦИАЛИЗАЦИЯЛАУ ====================
 if 'df' not in st.session_state:
     st.session_state.df = None
-if 'raw_data' not in st.session_state:
-    st.session_state.raw_data = None
 if 'github_token' not in st.session_state:
     st.session_state.github_token = None
 
 # ==================== ФУНКЦИЯЛАР ====================
 def show_token_form():
-    """Сол жақ панельде GitHub токенін енгізу формасы"""
     with st.sidebar:
         st.markdown("### 🔐 GitHub авторизациясы")
         token = st.text_input("GitHub Personal Access Token:", type="password", key="github_token_input")
         if token:
             st.session_state.github_token = token
             st.success("✅ Токен сақталды!")
-        
         st.markdown("""
         **Токен алу үшін:**
         1. [GitHub Settings → Tokens](https://github.com/settings/tokens)
@@ -42,119 +38,111 @@ def show_token_form():
         """)
 
 def load_from_github():
-    """GitHub-тан Excel файлын жүктеу - ТОЛЫҚ НҰСҚА"""
+    """GitHub-тан Excel файлын жүктеу"""
     try:
         with st.spinner("📥 GitHub-тан жүктелуде..."):
-            # 1. Файлды жүктеу
             response = requests.get(GITHUB_RAW_URL, timeout=30)
             response.raise_for_status()
             
-            # 2. Excel оқу (барлық деректерді сақтау)
+            # Excel оқу
             excel_data = BytesIO(response.content)
             df_raw = pd.read_excel(excel_data, engine='openpyxl', header=None)
             
-            st.write("### 📄 Жүктелген файлдың алғашқы көрінісі:")
-            st.dataframe(df_raw.head(20), use_container_width=True)
+            # Бірінші жолдағы баған атаулары
+            first_row = df_raw.iloc[0].fillna('').astype(str).tolist()
             
-            # 3. Баған атауларын анықтау (бірінші жол - баған атаулары)
-            if len(df_raw) > 0:
-                # Бірінші жолды баған атауы ретінде алу
-                column_names = df_raw.iloc[0].fillna('').astype(str).tolist()
-                # Деректер жолдары
-                data_rows = df_raw.iloc[1:].reset_index(drop=True)
-                
-                # Баған атауларын тазалау
-                clean_names = []
-                for name in column_names:
-                    name = str(name).strip()
-                    if 'ФИО' in name or 'фио' in name:
-                        clean_names.append('ФИО')
-                    elif 'Предмет' in name or 'предмет' in name:
-                        clean_names.append('Предмет')
-                    elif 'Коэф' in name or 'коэф' in name:
-                        clean_names.append('Коэф')
-                    elif 'Ср.балл' in name or 'ср.балл' in name or 'Средний' in name:
-                        clean_names.append('Ср.балл')
-                    elif 'Үштік' in name or 'үштік' in name or 'троек' in name:
-                        clean_names.append('Үштік')
-                    elif 'Результативность' in name or 'результативность' in name:
-                        clean_names.append('Результативность')
-                    elif 'Внеклас' in name or 'внеклас' in name:
-                        clean_names.append('Внеклас.')
-                    elif 'Метод' in name or 'метод' in name:
-                        clean_names.append('Метод.')
-                    elif 'Админ' in name or 'админ' in name or 'рейтинг' in name:
-                        clean_names.append('Админ.рейтинг')
-                    elif 'Жалпы' in name or 'жалпы' in name or 'Итог' in name:
-                        clean_names.append('Жалпы итог')
-                    else:
-                        clean_names.append(name)
-                
-                # Бағандардың дұрыстығын тексеру
-                required_cols = ['ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік']
-                missing_cols = [col for col in required_cols if col not in clean_names]
-                
-                if missing_cols:
-                    st.warning(f"Келесі бағандар табылмады: {missing_cols}")
-                    st.info("Баған атауларын қолмен тексеріңіз.")
-                    # Үлгі ретінде бағандарды орнату
-                    if len(clean_names) >= 11:
-                        clean_names = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
-                                      'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
-                    else:
-                        clean_names = [f'Баған_{i}' for i in range(len(clean_names))]
-                
-                # DataFrame құру
-                df = pd.DataFrame(data_rows.values, columns=clean_names)
-                
-                # Бағандарды сандық түрге келтіру
-                numeric_cols = ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
-                for col in numeric_cols:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
-                # '№' бағаны жоқ болса, қосу
-                if '№' not in df.columns:
-                    df.insert(0, '№', range(1, len(df) + 1))
-                else:
-                    df['№'] = range(1, len(df) + 1)
-                
-                # ФИО және Предмет бағандарындағы бос мәндерді толтыру
-                df['ФИО'] = df['ФИО'].fillna('Белгісіз')
-                df['Предмет'] = df['Предмет'].fillna('Белгісіз')
-                
-                # Рейтингті есептеу
-                if 'Результативность' in df.columns and 'Жалпы итог' in df.columns:
-                    pass  # есептеу қажет емес
-                else:
-                    df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
-                    df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
-                
-                df['Результативность'] = df['Результативность'].round(1)
-                df['Жалпы итог'] = df['Жалпы итог'].round(1)
-                
-                # Бос жолдарды өшіру
-                df = df.dropna(subset=['ФИО'], how='all')
-                df = df[df['ФИО'] != 'Белгісіз']
-                
-                st.session_state.df = df
-                st.session_state.raw_data = df_raw
-                st.success(f"✅ {len(df)} мұғалім жүктелді!")
-                
-                # Жүктелген кестені көрсету
-                st.subheader("📋 Жүктелген кесте")
-                st.dataframe(df, use_container_width=True, height=400)
-                return True
+            # Қажетті бағандардың индекстерін табу
+            col_mapping = {}
+            for i, name in enumerate(first_row):
+                name_lower = str(name).lower().strip()
+                if 'фио' in name_lower or 'ф.и.о' in name_lower or 'фамилия' in name_lower:
+                    col_mapping['ФИО'] = i
+                elif 'предмет' in name_lower:
+                    col_mapping['Предмет'] = i
+                elif 'коэф' in name_lower or 'коэффициент' in name_lower:
+                    col_mapping['Коэф'] = i
+                elif 'ср.балл' in name_lower or 'средний балл' in name_lower or 'средний' in name_lower:
+                    col_mapping['Ср.балл'] = i
+                elif 'үштік' in name_lower or 'троек' in name_lower or '3' in name_lower:
+                    col_mapping['Үштік'] = i
+                elif 'результативность' in name_lower:
+                    col_mapping['Результативность'] = i
+                elif 'внеклас' in name_lower:
+                    col_mapping['Внеклас.'] = i
+                elif 'метод' in name_lower:
+                    col_mapping['Метод.'] = i
+                elif 'админ' in name_lower or 'рейтинг' in name_lower:
+                    col_mapping['Админ.рейтинг'] = i
+                elif 'жалпы' in name_lower or 'итог' in name_lower:
+                    col_mapping['Жалпы итог'] = i
             
-        return False
+            # Қажетті бағандардың тізімі
+            required_cols = ['ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік']
+            missing_cols = [col for col in required_cols if col not in col_mapping]
+            
+            if missing_cols:
+                st.warning(f"Келесі бағандар табылмады: {missing_cols}")
+                st.info("Баған атаулары: " + ", ".join([f"'{x}'" for x in first_row if x]))
+                return False
+            
+            # Деректерді жинау
+            data_rows = []
+            for idx in range(1, len(df_raw)):
+                row = df_raw.iloc[idx]
+                # Егер ФИО бос болса, өткізіп жіберу
+                if pd.isna(row[col_mapping['ФИО']]):
+                    continue
+                    
+                new_row = {}
+                for key, col_idx in col_mapping.items():
+                    val = row[col_idx]
+                    if key in ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']:
+                        try:
+                            new_row[key] = float(val) if pd.notna(val) else 0
+                        except:
+                            new_row[key] = 0
+                    else:
+                        new_row[key] = str(val) if pd.notna(val) else ''
+                
+                data_rows.append(new_row)
+            
+            if not data_rows:
+                st.error("Деректер табылмады!")
+                return False
+            
+            # DataFrame құру
+            df = pd.DataFrame(data_rows)
+            
+            # Сандық бағандарды дұрыстау
+            for col in ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Нөмірлерді қосу
+            df.insert(0, '№', range(1, len(df) + 1))
+            
+            # Егер Результативность және Жалпы итог бағандары болмаса, есептеу
+            if 'Результативность' not in df.columns:
+                df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
+            if 'Жалпы итог' not in df.columns:
+                df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
+            
+            df['Результативность'] = df['Результативность'].round(1)
+            df['Жалпы итог'] = df['Жалпы итог'].round(1)
+            
+            st.session_state.df = df
+            st.success(f"✅ {len(df)} мұғалім жүктелді!")
+            
+            # Кестені көрсету
+            st.subheader("📋 Жүктелген кесте")
+            st.dataframe(df, use_container_width=True, height=400)
+            return True
             
     except Exception as e:
         st.error(f"❌ Жүктеу қатесі: {str(e)}")
-        st.info("Файл құрылымын тексеріңіз. Бірінші жолда баған атаулары болуы керек.")
         return False
 
 def save_to_github_direct():
-    """GitHub API арқылы тікелей сақтау"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
         return
@@ -168,6 +156,7 @@ def save_to_github_direct():
         with st.spinner("💾 GitHub-қа сақталуда..."):
             output = BytesIO()
             save_df = st.session_state.df.copy()
+            save_df = save_df.drop(columns=['№'], errors='ignore')
             save_df.to_excel(output, index=False, engine='openpyxl')
             output.seek(0)
             content_b64 = base64.b64encode(output.getvalue()).decode('utf-8')
@@ -191,13 +180,14 @@ def save_to_github_direct():
         st.error(f"❌ Сақтау қатесі: {str(e)}")
 
 def save_to_local():
-    """Жергілікті файлға сақтау"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
         return
     
     output = BytesIO()
-    st.session_state.df.to_excel(output, index=False, engine='openpyxl')
+    save_df = st.session_state.df.copy()
+    save_df = save_df.drop(columns=['№'], errors='ignore')
+    save_df.to_excel(output, index=False, engine='openpyxl')
     output.seek(0)
     
     st.download_button(
@@ -208,7 +198,6 @@ def save_to_local():
     )
 
 def calculate_rating():
-    """Рейтингті есептеу"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
         return
@@ -223,7 +212,6 @@ def calculate_rating():
     st.rerun()
 
 def add_teacher():
-    """Жаңа мұғалім қосу"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
         return
@@ -268,7 +256,6 @@ def add_teacher():
             st.rerun()
 
 def delete_teacher():
-    """Мұғалімді өшіру"""
     if st.session_state.df is None or len(st.session_state.df) == 0:
         st.warning("Өшіретін мұғалім жоқ!")
         return
@@ -330,46 +317,27 @@ if st.session_state.df is not None and len(st.session_state.df) > 0:
     st.subheader("📊 Статистика")
     valid_df = st.session_state.df.dropna(subset=['Жалпы итог'])
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📚 Мұғалімдер саны", len(valid_df))
-    with col2:
-        st.metric("📊 Орташа жалпы итог", f"{valid_df['Жалпы итог'].mean():.1f}")
-    with col3:
-        if len(valid_df) > 0:
-            best = valid_df.loc[valid_df['Жалпы итог'].idxmax(), 'ФИО']
+    if len(valid_df) > 0:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📚 Мұғалімдер саны", len(valid_df))
+        with col2:
+            st.metric("📊 Орташа жалпы итог", f"{valid_df['Жалпы итог'].mean():.1f}")
+        with col3:
+            best_idx = valid_df['Жалпы итог'].idxmax()
+            best = valid_df.loc[best_idx, 'ФИО']
             st.metric("🏆 Ең жақсы нәтиже", f"{best} ({valid_df['Жалпы итог'].max():.1f})")
-    with col4:
-        if len(valid_df) > 0:
-            worst = valid_df.loc[valid_df['Жалпы итог'].idxmin(), 'ФИО']
+        with col4:
+            worst_idx = valid_df['Жалпы итог'].idxmin()
+            worst = valid_df.loc[worst_idx, 'ФИО']
             st.metric("⚠️ Ең төмен нәтиже", f"{worst} ({valid_df['Жалпы итог'].min():.1f})")
     
     # CSV экспорт
-    csv = valid_df.to_csv(index=False).encode('utf-8-sig')
+    csv = st.session_state.df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(label="📥 CSV форматында жүктеу", data=csv, file_name="reiting_export.csv", mime="text/csv")
 
-elif st.session_state.df is not None and len(st.session_state.df) == 0:
-    st.warning("Деректер жоқ. Жаңа мұғалім қосыңыз!")
 else:
     st.info("👆 Бастау үшін **«GitHub-тан жүктеу»** батырмасын басыңыз.")
-    
-    if st.button("📋 Үлгі кесте жасау"):
-        sample_data = pd.DataFrame({
-            '№': [1, 2, 3],
-            'ФИО': ['АХШАЛОВА', 'АЗЫМБАЕВА', 'АЙТБАЙ'],
-            'Предмет': ['Математика', 'Химия', 'Математика'],
-            'Коэф': [1.1, 1.0, 1.1],
-            'Ср.балл': [4.3, 4.5, 4.7],
-            'Үштік': [11, 8, 9],
-            'Результативность': [-7.8, -4.5, -5.4],
-            'Внеклас.': [0, 0, 0],
-            'Метод.': [0, 0, 0],
-            'Админ.рейтинг': [-6, -6, -6],
-            'Жалпы итог': [-13.8, -10.5, -11.4]
-        })
-        st.session_state.df = sample_data
-        st.success("✅ Үлгі кесте жасалды!")
-        st.rerun()
 
 st.markdown("---")
 st.caption("© Мұғалімдер рейтингі | GitHub-қа сақтау үшін сол жақ панельге токен енгізіңіз")
