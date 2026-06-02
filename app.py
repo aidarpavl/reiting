@@ -25,7 +25,7 @@ def load_from_github():
     """GitHub-тан Excel файлын жүктеу"""
     try:
         with st.spinner("📥 GitHub-тан жүктелуде..."):
-            response = requests.get(https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx, timeout=30)
+            response = requests.get(GITHUB_URL, timeout=30)
             response.raise_for_status()
             
             # Жергілікті сақтау
