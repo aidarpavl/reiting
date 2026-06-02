@@ -3,7 +3,6 @@ import requests
 from io import BytesIO
 import os
 from tabulate import tabulate
-
 # GitHub файл сілтемесі
 GITHUB_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
 LOCAL_FILE = "reiting1.xlsx"
