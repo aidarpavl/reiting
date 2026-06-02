@@ -8,34 +8,28 @@ from io import BytesIO
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
 GITHUB_API_URL = "https://api.github.com/repos/aidarpavl/reiting/contents/reiting1.xlsx"
 
-# ==================== БЕТ КОНФИГУРАЦИЯСЫ ====================
-st.set_page_config(
-    page_title="Мұғалімдер рейтингі",
-    page_icon="📊",
-    layout="wide"
-)
+# ==================== БАҒАН АТАУЛАРЫНЫҢ СӘЙКЕСТІГІ ====================
+COLUMN_MAPPING = {
+    'ФИО': ['фио', 'ф.и.о', 'фамилия', 'ф.и.о.', 'fio'],
+    'Предмет': ['предмет', 'пән', 'subject', 'пәні'],
+    'Коэф': ['коэф', 'коэффициент', 'коэф.', 'k', 'kоэф', 'коэфициент'],
+    'Ср.балл': ['ср балл', 'ср.балл', 'средний балл', 'орташа балл', 'ср балл', 'ср_балл'],
+    'Үштік': ['үштік', 'троек', 'кол-во итоговых троек', 'итоговые тройки', '3'],
+    'Внеклас.': ['внеклас', 'внекласная работа', 'итог внекл.работа', 'внекл.работа'],
+    'Метод.': ['метод', 'методическая деятельность', 'итог метод. деятельности'],
+    'Админ.рейтинг': ['админ', 'рейтинг учителя', 'итог у администрации', 'админ.рейтинг'],
+    'Результативность': ['результативность', 'результативность по предмету'],
+    'Жалпы итог': ['жалпы итог', 'общий итог', 'итог']
+}
 
-# ==================== СЕССИЯ КҮЙІН ИНИЦИАЛИЗАЦИЯЛАУ ====================
-if 'df' not in st.session_state:
-    st.session_state.df = None
-if 'github_token' not in st.session_state:
-    st.session_state.github_token = None
-
-# ==================== ФУНКЦИЯЛАР ====================
-def show_token_form():
-    with st.sidebar:
-        st.markdown("### 🔐 GitHub авторизациясы")
-        token = st.text_input("GitHub Personal Access Token:", type="password", key="github_token_input")
-        if token:
-            st.session_state.github_token = token
-            st.success("✅ Токен сақталды!")
-        st.markdown("""
-        **Токен алу үшін:**
-        1. [GitHub Settings → Tokens](https://github.com/settings/tokens)
-        2. **Generate new token (classic)** басыңыз
-        3. `repo` рұқсатын қосыңыз
-        4. Токенді көшіріңіз
-        """)
+def find_column_index(headers, target_variants):
+    """Баған атауын әртүрлі нұсқалар бойынша іздеу"""
+    for i, header in enumerate(headers):
+        header_lower = str(header).lower().strip()
+        for variant in target_variants:
+            if variant.lower() in header_lower or header_lower == variant.lower():
+                return i
+    return None
 
 def load_from_github():
     """GitHub-тан Excel файлын жүктеу"""
@@ -49,60 +43,48 @@ def load_from_github():
             df_raw = pd.read_excel(excel_data, engine='openpyxl', header=None)
             
             # Бірінші жолдағы баған атаулары
-            first_row = df_raw.iloc[0].fillna('').astype(str).tolist()
+            headers = df_raw.iloc[0].fillna('').astype(str).tolist()
             
-            # Қажетті бағандардың индекстерін табу
-            col_mapping = {}
-            for i, name in enumerate(first_row):
-                name_lower = str(name).lower().strip()
-                if 'фио' in name_lower or 'ф.и.о' in name_lower or 'фамилия' in name_lower:
-                    col_mapping['ФИО'] = i
-                elif 'предмет' in name_lower:
-                    col_mapping['Предмет'] = i
-                elif 'коэф' in name_lower or 'коэффициент' in name_lower:
-                    col_mapping['Коэф'] = i
-                elif 'ср.балл' in name_lower or 'средний балл' in name_lower or 'средний' in name_lower:
-                    col_mapping['Ср.балл'] = i
-                elif 'үштік' in name_lower or 'троек' in name_lower or '3' in name_lower:
-                    col_mapping['Үштік'] = i
-                elif 'результативность' in name_lower:
-                    col_mapping['Результативность'] = i
-                elif 'внеклас' in name_lower:
-                    col_mapping['Внеклас.'] = i
-                elif 'метод' in name_lower:
-                    col_mapping['Метод.'] = i
-                elif 'админ' in name_lower or 'рейтинг' in name_lower:
-                    col_mapping['Админ.рейтинг'] = i
-                elif 'жалпы' in name_lower or 'итог' in name_lower:
-                    col_mapping['Жалпы итог'] = i
+            st.info(f"📋 Файлдан табылған бағандар: {', '.join(headers[:15])}...")
             
-            # Қажетті бағандардың тізімі
-            required_cols = ['ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік']
-            missing_cols = [col for col in required_cols if col not in col_mapping]
+            # Бағандарды сәйкестендіру
+            col_indices = {}
+            for target, variants in COLUMN_MAPPING.items():
+                idx = find_column_index(headers, variants)
+                if idx is not None:
+                    col_indices[target] = idx
+                    st.success(f"✅ '{target}' → '{headers[idx]}'")
+                else:
+                    st.warning(f"⚠️ '{target}' бағаны табылмады. Іздеген нұсқалар: {variants}")
             
-            if missing_cols:
-                st.warning(f"Келесі бағандар табылмады: {missing_cols}")
-                st.info("Баған атаулары: " + ", ".join([f"'{x}'" for x in first_row if x]))
+            # Міндетті бағандарды тексеру
+            required = ['ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік']
+            missing = [r for r in required if r not in col_indices]
+            if missing:
+                st.error(f"Келесі міндетті бағандар табылмады: {missing}")
+                st.info("Excel файлының бірінші жолында баған атаулары дұрыс екенін тексеріңіз.")
                 return False
             
             # Деректерді жинау
             data_rows = []
-            for idx in range(1, len(df_raw)):
-                row = df_raw.iloc[idx]
-                # Егер ФИО бос болса, өткізіп жіберу
-                if pd.isna(row[col_mapping['ФИО']]):
+            for row_idx in range(1, len(df_raw)):
+                row = df_raw.iloc[row_idx]
+                
+                # ФИО бос болса өткізіп жіберу
+                fio_val = row[col_indices['ФИО']]
+                if pd.isna(fio_val) or str(fio_val).strip() == '':
                     continue
-                    
+                
                 new_row = {}
-                for key, col_idx in col_mapping.items():
+                for target, col_idx in col_indices.items():
                     val = row[col_idx]
-                    if key in ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']:
+                    if target in ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']:
                         try:
-                            new_row[key] = float(val) if pd.notna(val) else 0
-                        except:
-                            new_row[key] = 0
+                            new_row[target] = float(val) if pd.notna(val) else 0
+                        except (ValueError, TypeError):
+                            new_row[target] = 0
                     else:
-                        new_row[key] = str(val) if pd.notna(val) else ''
+                        new_row[target] = str(val) if pd.notna(val) else ''
                 
                 data_rows.append(new_row)
             
@@ -114,21 +96,23 @@ def load_from_github():
             df = pd.DataFrame(data_rows)
             
             # Сандық бағандарды дұрыстау
-            for col in ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']:
+            numeric_cols = ['Коэф', 'Ср.балл', 'Үштік', 'Внеклас.', 'Метод.', 'Админ.рейтинг']
+            for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # Нөмірлерді қосу
-            df.insert(0, '№', range(1, len(df) + 1))
+            # Результативность есептеу
+            df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
             
-            # Егер Результативность және Жалпы итог бағандары болмаса, есептеу
-            if 'Результативность' not in df.columns:
-                df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
-            if 'Жалпы итог' not in df.columns:
-                df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
+            # Жалпы итог есептеу
+            df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
             
+            # Дөңгелектеу
             df['Результативность'] = df['Результативность'].round(1)
             df['Жалпы итог'] = df['Жалпы итог'].round(1)
+            
+            # Нөмірлерді қосу
+            df.insert(0, '№', range(1, len(df) + 1))
             
             st.session_state.df = df
             st.success(f"✅ {len(df)} мұғалім жүктелді!")
@@ -147,9 +131,9 @@ def save_to_github_direct():
         st.warning("Алдымен файлды жүктеңіз!")
         return
     
-    token = st.session_state.github_token
+    token = st.session_state.get('github_token')
     if not token:
-        st.error("🔐 GitHub токені енгізілмеген!")
+        st.error("🔐 GitHub токені енгізілмеген! Сол жақ панельге токеніңізді енгізіңіз.")
         return
     
     try:
@@ -174,7 +158,8 @@ def save_to_github_direct():
             if put_response.status_code in [200, 201]:
                 st.success("✅ Файл GitHub-қа сәтті сақталды!")
             else:
-                st.error(f"❌ GitHub API қатесі: {put_response.status_code}")
+                error_detail = put_response.json() if put_response.text else {"message": "Белгісіз қате"}
+                st.error(f"❌ GitHub API қатесі: {error_detail.get('message', put_response.status_code)}")
                 
     except Exception as e:
         st.error(f"❌ Сақтау қатесі: {str(e)}")
@@ -274,7 +259,20 @@ def delete_teacher():
 
 # ==================== НЕГІЗГІ ИНТЕРФЕЙС ====================
 
-show_token_form()
+# Сол жақ панель
+with st.sidebar:
+    st.markdown("### 🔐 GitHub авторизациясы")
+    token = st.text_input("GitHub Personal Access Token:", type="password", key="github_token_input")
+    if token:
+        st.session_state.github_token = token
+        st.success("✅ Токен сақталды!")
+    st.markdown("""
+    **Токен алу үшін:**
+    1. [GitHub Settings → Tokens](https://github.com/settings/tokens)
+    2. **Generate new token (classic)** басыңыз
+    3. `repo` рұқсатын қосыңыз
+    4. Токенді көшіріңіз
+    """)
 
 st.title("📊 Мұғалімдер рейтингі – GitHub интеграциясы")
 st.markdown("---")
