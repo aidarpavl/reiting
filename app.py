@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
 import requests
+import json
+import base64
 from io import BytesIO
-import os
 import traceback
 
-# GitHub файл сілтемесі
+# GitHub параметрлері
 GITHUB_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
-LOCAL_FILE = "reiting1.xlsx"
+GITHUB_API_URL = "https://api.github.com/repos/aidarpavl/reiting/contents/reiting1.xlsx"
+GITHUB_TOKEN = None  # GitHub Personal Access Token
 
 # Бетті конфигурациялау
 st.set_page_config(
@@ -21,47 +23,43 @@ if 'df' not in st.session_state:
     st.session_state.df = None
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
-if 'error_message' not in st.session_state:
-    st.session_state.error_message = None
+
+# GitHub токенін енгізу формасы
+def show_token_form():
+    with st.sidebar:
+        st.markdown("### 🔐 GitHub авторизациясы")
+        st.markdown("GitHub-қа тікелей сақтау үшін токен қажет")
+        token = st.text_input("GitHub Personal Access Token:", type="password", key="github_token")
+        if token:
+            st.session_state.github_token = token
+            st.success("✅ Токен сақталды!")
+            st.rerun()
+        st.markdown("""
+        **Токен алу үшін:**
+        1. [GitHub Settings → Developer settings](https://github.com/settings/tokens) өтіңіз
+        2. **Generate new token (classic)** басыңыз
+        3. `repo` рұқсатын қосыңыз
+        4. Токенді көшіріп, жоғарыға енгізіңіз
+        """)
 
 def load_from_github():
     """GitHub-тан Excel файлын жүктеу"""
     try:
         with st.spinner("📥 GitHub-тан жүктелуде..."):
-            st.session_state.error_message = None
-            
-            # Файлды жүктеу
             response = requests.get(GITHUB_URL, timeout=30)
-            
-            if response.status_code == 404:
-                st.session_state.error_message = "Файл табылмады! GitHub сілтемесін тексеріңіз."
-                st.error(st.session_state.error_message)
-                return False
-                
             response.raise_for_status()
             
-            # Жергілікті сақтау
-            with open(LOCAL_FILE, 'wb') as f:
-                f.write(response.content)
-            
             # Excel оқу
-            df = pd.read_excel(LOCAL_FILE, engine='openpyxl')
+            df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
             
             # Баған атауларын стандарттау
-            expected_columns = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
-                               'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
-            
-            # Егер баған саны сәйкес келсе, атауларын өзгерту
-            if len(df.columns) == len(expected_columns):
-                df.columns = expected_columns
-            elif len(df.columns) >= 11:
+            if len(df.columns) >= 11:
                 df = df.iloc[:, :11]
-                df.columns = expected_columns
+                df.columns = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
+                             'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
             else:
-                st.warning(f"Баған саны сәйкес емес. Күтілген: 11, Алынған: {len(df.columns)}")
-            
-            # Нөмірлерді қайта есептеу
-            df['№'] = range(1, len(df) + 1)
+                st.error(f"Күтілетін баған саны 11, алынған: {len(df.columns)}")
+                return False
             
             # Сандық бағандарды конвертациялау
             numeric_cols = ['Коэф', 'Ср.балл', 'Үштік', 'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
@@ -69,44 +67,95 @@ def load_from_github():
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
+            # Нөмірлерді қайта есептеу
+            df['№'] = range(1, len(df) + 1)
+            
+            # Рейтингті қайта есептеу
+            df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
+            df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
+            df['Результативность'] = df['Результативность'].round(1)
+            df['Жалпы итог'] = df['Жалпы итог'].round(1)
+            
             st.session_state.df = df
             st.session_state.data_loaded = True
-            st.success(f"✅ Жүктелді! {len(df)} мұғалім")
+            st.success(f"✅ {len(df)} мұғалім жүктелді!")
             return True
             
-    except requests.exceptions.ConnectionError:
-        st.session_state.error_message = "Интернет қосылымын тексеріңіз!"
-        st.error(st.session_state.error_message)
-        return False
     except Exception as e:
-        st.session_state.error_message = str(e)
         st.error(f"❌ Жүктеу қатесі: {str(e)}")
         return False
 
-def save_to_github():
-    """Өзгерістерді жергілікті файлға сақтау"""
+def save_to_github_direct():
+    """GitHub API арқылы тікелей сақтау"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
-        return False
+        return
+    
+    token = st.session_state.get('github_token', None)
+    if not token:
+        st.error("🔐 GitHub токені енгізілмеген! Сол жақ панельге токеніңізді енгізіңіз.")
+        return
     
     try:
-        # Көрсету үшін көшірме жасау
-        save_df = st.session_state.df.copy()
-        save_df.to_excel(LOCAL_FILE, index=False, engine='openpyxl')
-        st.success("✅ Файл жергілікті компьютерге сақталды!")
-        
-        # GitHub-қа жүктеу нұсқауы
-        with st.expander("📌 GitHub-қа қалай жүктеу керек?"):
-            st.markdown("""
-            1. [GitHub репозиторийіне](https://github.com/aidarpavl/reiting) өтіңіз
-            2. `reiting1.xlsx` файлын тауып, **Update** батырмасын басыңыз
-            3. Жаңа файлды таңдаңыз (жергілікті `reiting1.xlsx`)
-            4. **Commit changes** батырмасын басыңыз
-            """)
-        return True
+        with st.spinner("💾 GitHub-қа сақталуда..."):
+            # DataFrame-ді байттарға түрлендіру
+            output = BytesIO()
+            save_df = st.session_state.df.copy()
+            save_df.to_excel(output, index=False, engine='openpyxl')
+            output.seek(0)
+            content_bytes = output.getvalue()
+            content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+            
+            # Файлдың ағымдағы SHA мәнін алу
+            headers = {
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+            get_response = requests.get(GITHUB_API_URL, headers=headers)
+            sha = get_response.json().get('sha') if get_response.status_code == 200 else None
+            
+            # GitHub-қа жүктеу
+            data = {
+                "message": "Update reiting1.xlsx",
+                "content": content_b64,
+                "branch": "main"
+            }
+            if sha:
+                data["sha"] = sha
+            
+            put_response = requests.put(GITHUB_API_URL, headers=headers, json=data)
+            
+            if put_response.status_code in [200, 201]:
+                st.success("✅ Файл GitHub-қа сәтті сақталды!")
+            else:
+                st.error(f"❌ GitHub API қатесі: {put_response.status_code}")
+                st.json(put_response.json() if put_response.text else {})
+                
     except Exception as e:
         st.error(f"❌ Сақтау қатесі: {str(e)}")
-        return False
+
+def save_to_local():
+    """Жергілікті файлға сақтау"""
+    if st.session_state.df is None:
+        st.warning("Алдымен файлды жүктеңіз!")
+        return
+    
+    try:
+        df = st.session_state.df.copy()
+        output = BytesIO()
+        df.to_excel(output, index=False, engine='openpyxl')
+        output.seek(0)
+        
+        st.download_button(
+            label="📥 Excel файлын жүктеу",
+            data=output,
+            file_name="reiting1.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_excel"
+        )
+        st.success("✅ Файл жүктеуге дайын!")
+    except Exception as e:
+        st.error(f"❌ Қате: {str(e)}")
 
 def calculate_rating():
     """Рейтингті есептеу"""
@@ -114,27 +163,24 @@ def calculate_rating():
         st.warning("Алдымен файлды жүктеңіз!")
         return
     
-    try:
-        df = st.session_state.df.copy()
-        
-        # Результативность = (Ср.балл × Коэф) – (Үштік × 0.9)
-        df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
-        
-        # Жалпы итог = Результативность + Внеклас. + Метод. + Админ.рейтинг
-        df['Жалпы итог'] = (df['Результативность'] + 
-                             df['Внеклас.'] + 
-                             df['Метод.'] + 
-                             df['Админ.рейтинг'])
-        
-        # Сандарды дөңгелектеу
-        df['Результативность'] = df['Результативность'].round(1)
-        df['Жалпы итог'] = df['Жалпы итог'].round(1)
-        
-        st.session_state.df = df
-        st.success("✅ Рейтинг сәтті есептелді!")
-        st.rerun()
-    except Exception as e:
-        st.error(f"❌ Есептеу қатесі: {str(e)}")
+    df = st.session_state.df
+    
+    # Результативность = (Ср.балл × Коэф) – (Үштік × 0.9)
+    df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
+    
+    # Жалпы итог = Результативность + Внеклас. + Метод. + Админ.рейтинг
+    df['Жалпы итог'] = (df['Результативность'] + 
+                         df['Внеклас.'] + 
+                         df['Метод.'] + 
+                         df['Админ.рейтинг'])
+    
+    # Сандарды дөңгелектеу
+    df['Результативность'] = df['Результативность'].round(1)
+    df['Жалпы итог'] = df['Жалпы итог'].round(1)
+    
+    st.session_state.df = df
+    st.success("✅ Рейтинг сәтті есептелді!")
+    st.rerun()
 
 def add_teacher():
     """Жаңа мұғалім қосу"""
@@ -191,7 +237,7 @@ def delete_teacher():
         return
     
     df = st.session_state.df
-    teacher_options = {f"{row['№']}. {row['ФИО']} - {row['Предмет']}": idx 
+    teacher_options = {f"{row['№']}. {row['ФИО']} - {row['Предмет']} (Итог: {row['Жалпы итог']})": idx 
                        for idx, row in df.iterrows()}
     
     selected = st.selectbox("Өшіретін мұғалімді таңдаңыз:", list(teacher_options.keys()))
@@ -206,80 +252,74 @@ def delete_teacher():
 
 # ==================== НЕГІЗГІ ИНТЕРФЕЙС ====================
 
+# Сол жақ панельде токен формасы
+show_token_form()
+
 st.title("📊 Мұғалімдер рейтингі – GitHub интеграциясы")
 st.markdown("---")
 
 # Батырмалар панелі
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     if st.button("📥 GitHub-тан жүктеу", use_container_width=True):
         load_from_github()
 
 with col2:
-    if st.button("💾 Жергілікті сақтау", use_container_width=True):
-        save_to_github()
+    if st.button("💾 GitHub-қа сақтау", use_container_width=True):
+        save_to_github_direct()
 
 with col3:
+    if st.button("📁 Жергілікті сақтау", use_container_width=True):
+        save_to_local()
+
+with col4:
     if st.button("➕ Жаңа мұғалім қосу", use_container_width=True):
         add_teacher()
 
-with col4:
+with col5:
     if st.button("🔄 Рейтингті есептеу", use_container_width=True):
         calculate_rating()
 
-with col5:
+with col6:
     if st.button("🗑 Мұғалім өшіру", use_container_width=True):
         delete_teacher()
 
 st.markdown("---")
 
 # Кестені көрсету
-if st.session_state.df is not None:
+if st.session_state.df is not None and len(st.session_state.df) > 0:
     st.subheader("📋 Мұғалімдер тізімі")
     
-    # Түсті кодтау функциясы (жаңа pandas нұсқасына бейімделген)
-    def color_negative(val):
-        try:
-            val = float(val)
-            if val < 0:
-                return 'color: red'
-            elif val > 5:
-                return 'color: green'
-            return ''
-        except:
-            return ''
+    # Кестені көрсету (барлық жолдар)
+    st.dataframe(st.session_state.df, use_container_width=True, height=500)
     
-    # Кестені стильдеу (applymap орнына map қолданылды)
-    try:
-        styled_df = st.session_state.df.style.map(color_negative, subset=['Жалпы итог', 'Результативность'])
-        st.dataframe(styled_df, use_container_width=True, height=400)
-    except:
-        # Егер стильдеу қате берсе, жай кестені көрсету
-        st.dataframe(st.session_state.df, use_container_width=True, height=400)
-    
-    # Статистика
+    # Статистика (NaN мәндерін өңдеу)
+    st.subheader("📊 Статистика")
     col1, col2, col3, col4 = st.columns(4)
+    
+    valid_df = st.session_state.df.dropna(subset=['Жалпы итог'])
+    
     with col1:
-        st.metric("📚 Мұғалімдер саны", len(st.session_state.df))
+        st.metric("📚 Мұғалімдер саны", len(valid_df))
     with col2:
-        avg_total = st.session_state.df['Жалпы итог'].mean()
+        avg_total = valid_df['Жалпы итог'].mean()
         st.metric("📊 Орташа жалпы итог", f"{avg_total:.1f}")
     with col3:
-        if len(st.session_state.df) > 0:
-            best_idx = st.session_state.df['Жалпы итог'].idxmax()
-            best = st.session_state.df.loc[best_idx, 'ФИО']
-            best_score = st.session_state.df['Жалпы итог'].max()
+        if len(valid_df) > 0:
+            best_idx = valid_df['Жалпы итог'].idxmax()
+            best = valid_df.loc[best_idx, 'ФИО']
+            best_score = valid_df['Жалпы итог'].max()
             st.metric("🏆 Ең жақсы нәтиже", f"{best} ({best_score:.1f})")
     with col4:
-        if len(st.session_state.df) > 0:
-            worst_idx = st.session_state.df['Жалпы итог'].idxmin()
-            worst = st.session_state.df.loc[worst_idx, 'ФИО']
-            worst_score = st.session_state.df['Жалпы итог'].min()
+        if len(valid_df) > 0:
+            worst_idx = valid_df['Жалпы итог'].idxmin()
+            worst = valid_df.loc[worst_idx, 'ФИО']
+            worst_score = valid_df['Жалпы итог'].min()
             st.metric("⚠️ Ең төмен нәтиже", f"{worst} ({worst_score:.1f})")
     
-    # Экспорт батырмасы
-    csv = st.session_state.df.to_csv(index=False).encode('utf-8-sig')
+    # CSV экспорт
+    csv = valid_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
         label="📥 CSV форматында жүктеу",
         data=csv,
@@ -287,10 +327,12 @@ if st.session_state.df is not None:
         mime="text/csv",
     )
 
+elif st.session_state.df is not None and len(st.session_state.df) == 0:
+    st.warning("Деректер жоқ. Жаңа мұғалім қосыңыз!")
 else:
     st.info("👆 Бастау үшін **«GitHub-тан жүктеу»** батырмасын басыңыз.")
     
-    # Үлгі кесте жасау батырмасы
+    # Үлгі кесте жасау
     if st.button("📋 Үлгі кесте жасау"):
         sample_data = {
             '№': [1, 2, 3],
@@ -309,6 +351,5 @@ else:
         st.success("✅ Үлгі кесте жасалды!")
         st.rerun()
 
-# Футер
 st.markdown("---")
-st.caption("© Мұғалімдер рейтингі | Деректер GitHub репозиторийінде сақталады")
+st.caption("© Мұғалімдер рейтингі | GitHub-қа сақтау үшін сол жақ панельге токен енгізіңіз")
