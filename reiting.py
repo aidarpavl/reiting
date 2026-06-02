@@ -7,7 +7,25 @@ from tabulate import tabulate
 # GitHub файл сілтемесі
 GITHUB_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
 LOCAL_FILE = "reiting1.xlsx"
-
+def push_to_github_via_api(file_path, token, repo="aidarpavl/reiting", branch="main"):
+    """GitHub API арқылы файлды тікелей жүктеу"""
+    import base64
+    url = f"https://api.github.com/repos/{repo}/contents/reiting1.xlsx"
+    with open(file_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+    
+    # Алдымен файлдың ағымдағы SHA мәнін алу керек (егер бар болса)
+    headers = {"Authorization": f"token {token}"}
+    response = requests.get(url, headers=headers)
+    sha = response.json().get("sha") if response.status_code == 200 else None
+    
+    data = {"message": "Update reiting1.xlsx", "content": content, "branch": branch}
+    if sha:
+        data["sha"] = sha
+    
+    response = requests.put(url, headers=headers, json=data)
+    return response.status_code == 200
+    
 def load_from_github():
     """GitHub-тан Excel файлын жүктеп алу"""
     try:
