@@ -1,42 +1,43 @@
 import streamlit as st
 import pandas as pd
 import requests
-import json
 import base64
 from io import BytesIO
-import traceback
 
-# GitHub параметрлері
-GITHUB_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
+# ==================== GITHUB ПАРАМЕТРЛЕРІ ====================
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/aidarpavl/reiting/refs/heads/main/reiting1.xlsx"
 GITHUB_API_URL = "https://api.github.com/repos/aidarpavl/reiting/contents/reiting1.xlsx"
-GITHUB_TOKEN = None  # GitHub Personal Access Token
 
-# Бетті конфигурациялау
+# ==================== БЕТ КОНФИГУРАЦИЯСЫ ====================
 st.set_page_config(
     page_title="Мұғалімдер рейтингі",
     page_icon="📊",
     layout="wide"
 )
 
-# Сессия күйін инициализациялау
+# ==================== СЕССИЯ КҮЙІН ИНИЦИАЛИЗАЦИЯЛАУ ====================
 if 'df' not in st.session_state:
     st.session_state.df = None
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
+if 'github_token' not in st.session_state:
+    st.session_state.github_token = None
 
-# GitHub токенін енгізу формасы
+# ==================== ФУНКЦИЯЛАР ====================
 def show_token_form():
+    """Сол жақ панельде GitHub токенін енгізу формасы"""
     with st.sidebar:
         st.markdown("### 🔐 GitHub авторизациясы")
         st.markdown("GitHub-қа тікелей сақтау үшін токен қажет")
-        token = st.text_input("GitHub Personal Access Token:", type="password", key="github_token")
+        token = st.text_input("GitHub Personal Access Token:", type="password", key="token_input")
+        
         if token:
             st.session_state.github_token = token
             st.success("✅ Токен сақталды!")
-            st.rerun()
+        
         st.markdown("""
         **Токен алу үшін:**
-        1. [GitHub Settings → Developer settings](https://github.com/settings/tokens) өтіңіз
+        1. [GitHub Settings → Tokens](https://github.com/settings/tokens)
         2. **Generate new token (classic)** басыңыз
         3. `repo` рұқсатын қосыңыз
         4. Токенді көшіріп, жоғарыға енгізіңіз
@@ -46,7 +47,7 @@ def load_from_github():
     """GitHub-тан Excel файлын жүктеу"""
     try:
         with st.spinner("📥 GitHub-тан жүктелуде..."):
-            response = requests.get(GITHUB_URL, timeout=30)
+            response = requests.get(GITHUB_RAW_URL, timeout=30)
             response.raise_for_status()
             
             # Excel оқу
@@ -81,6 +82,9 @@ def load_from_github():
             st.success(f"✅ {len(df)} мұғалім жүктелді!")
             return True
             
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Интернет қосылымын тексеріңіз!")
+        return False
     except Exception as e:
         st.error(f"❌ Жүктеу қатесі: {str(e)}")
         return False
@@ -91,7 +95,7 @@ def save_to_github_direct():
         st.warning("Алдымен файлды жүктеңіз!")
         return
     
-    token = st.session_state.get('github_token', None)
+    token = st.session_state.github_token
     if not token:
         st.error("🔐 GitHub токені енгізілмеген! Сол жақ панельге токеніңізді енгізіңіз.")
         return
@@ -128,14 +132,14 @@ def save_to_github_direct():
             if put_response.status_code in [200, 201]:
                 st.success("✅ Файл GitHub-қа сәтті сақталды!")
             else:
-                st.error(f"❌ GitHub API қатесі: {put_response.status_code}")
-                st.json(put_response.json() if put_response.text else {})
+                error_msg = put_response.json().get('message', 'Белгісіз қате') if put_response.text else 'Белгісіз қате'
+                st.error(f"❌ GitHub API қатесі: {error_msg}")
                 
     except Exception as e:
         st.error(f"❌ Сақтау қатесі: {str(e)}")
 
 def save_to_local():
-    """Жергілікті файлға сақтау"""
+    """Жергілікті файлға сақтау (жүктеу)"""
     if st.session_state.df is None:
         st.warning("Алдымен файлды жүктеңіз!")
         return
@@ -153,7 +157,6 @@ def save_to_local():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_excel"
         )
-        st.success("✅ Файл жүктеуге дайын!")
     except Exception as e:
         st.error(f"❌ Қате: {str(e)}")
 
@@ -164,20 +167,10 @@ def calculate_rating():
         return
     
     df = st.session_state.df
-    
-    # Результативность = (Ср.балл × Коэф) – (Үштік × 0.9)
     df['Результативность'] = (df['Ср.балл'] * df['Коэф']) - (df['Үштік'] * 0.9)
-    
-    # Жалпы итог = Результативность + Внеклас. + Метод. + Админ.рейтинг
-    df['Жалпы итог'] = (df['Результативность'] + 
-                         df['Внеклас.'] + 
-                         df['Метод.'] + 
-                         df['Админ.рейтинг'])
-    
-    # Сандарды дөңгелектеу
+    df['Жалпы итог'] = df['Результативность'] + df['Внеклас.'] + df['Метод.'] + df['Админ.рейтинг']
     df['Результативность'] = df['Результативность'].round(1)
     df['Жалпы итог'] = df['Жалпы итог'].round(1)
-    
     st.session_state.df = df
     st.success("✅ Рейтинг сәтті есептелді!")
     st.rerun()
@@ -252,13 +245,14 @@ def delete_teacher():
 
 # ==================== НЕГІЗГІ ИНТЕРФЕЙС ====================
 
-# Сол жақ панельде токен формасы
+# Сол жақ панель
 show_token_form()
 
+# Негізгі бет
 st.title("📊 Мұғалімдер рейтингі – GitHub интеграциясы")
 st.markdown("---")
 
-# Батырмалар панелі
+# Батырмалар
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
@@ -291,7 +285,7 @@ st.markdown("---")
 if st.session_state.df is not None and len(st.session_state.df) > 0:
     st.subheader("📋 Мұғалімдер тізімі")
     
-    # Кестені көрсету (барлық жолдар)
+    # Кесте
     st.dataframe(st.session_state.df, use_container_width=True, height=500)
     
     # Статистика (NaN мәндерін өңдеу)
@@ -332,7 +326,6 @@ elif st.session_state.df is not None and len(st.session_state.df) == 0:
 else:
     st.info("👆 Бастау үшін **«GitHub-тан жүктеу»** батырмасын басыңыз.")
     
-    # Үлгі кесте жасау
     if st.button("📋 Үлгі кесте жасау"):
         sample_data = {
             '№': [1, 2, 3],
