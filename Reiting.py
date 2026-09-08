@@ -67,7 +67,7 @@ def display_table(df):
     print("МҰҒАЛІМДЕР РЕЙТИНГІ")
     print("="*100)
     # Көрсету үшін қажетті бағандар
-    display_df = df[['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштер', 
+    display_df = df[['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
                      'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']].copy()
     print(tabulate(display_df, headers='keys', tablefmt='grid', showindex=False))
     print("="*100)
@@ -79,7 +79,7 @@ def add_teacher(df):
     subject = input("Пәні: ")
     coeff = float(input("Коэффициент (мын. 1.0, 1.1, 0.9): "))
     avg = float(input("Орташа балл (0-5): "))
-    triplets = int(input("Үштер саны: "))
+    triplets = int(input("Үштік саны: "))
     extra = float(input("Внекласная работа (ұпай): "))
     method = float(input("Методическая деятельность (ұпай): "))
     admin = float(input("Администрация рейтингі (ұпай): "))
@@ -92,7 +92,7 @@ def add_teacher(df):
         'Предмет': subject,
         'Коэф': coeff,
         'Ср.балл': avg,
-        'Үштер': triplets,
+        'Үштік': triplets,
         'Внеклас.': extra,
         'Метод.': method,
         'Админ.рейтинг': admin,
@@ -156,7 +156,7 @@ def main():
     try:
         df = pd.read_excel(LOCAL_FILE, engine='openpyxl')
         # Баған атауларын стандарттау
-        df.columns = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштер', 
+        df.columns = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
                       'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
         print("✅ Файл сәтті оқылды!")
     except Exception as e:

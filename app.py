@@ -30,7 +30,7 @@ COLUMN_MAPPING = {
     'Предмет': ['предмет', 'пән', 'предметы', 'пәні'],
     'Коэф': ['коэф', 'коэффициент', 'коэф.', 'коэфициент', 'k'],
     'Ср.балл': ['ср балл', 'ср.балл', 'средний балл', 'орташа балл', 'средний'],
-    'Үштік': ['үштер', 'троек', 'кол-во итоговых троек', 'итоговые тройки', 'тройки'],
+    'Үштік': ['үштік', 'троек', 'кол-во итоговых троек', 'итоговые тройки', 'тройки'],
     'Внеклас.': ['внеклас', 'внекласная', 'внекл', 'итог внекл'],
     'Метод.': ['метод', 'методическая', 'итог метод'],
     'Админ.рейтинг': ['админ', 'рейтинг', 'итог у администрации'],
@@ -117,20 +117,20 @@ def load_from_github():
                 # Үштік
                 if 'Үштік' in col_indices:
                     try:
-                        teacher['Үштер'] = float(row[col_indices['Үштік']]) if pd.notna(row[col_indices['Үштік']]) else 0
+                        teacher['Үштік'] = float(row[col_indices['Үштік']]) if pd.notna(row[col_indices['Үштік']]) else 0
                     except:
-                        teacher['Үштер'] = 0
+                        teacher['Үштік'] = 0
                 else:
-                    teacher['Үштер'] = 0
+                    teacher['Үштік'] = 0
                 
                 # Внеклас.
                 if 'Внеклас.' in col_indices:
                     try:
-                        teacher['Одарен.дети.'] = float(row[col_indices['Внеклас.']]) if pd.notna(row[col_indices['Внеклас.']]) else 0
+                        teacher['Внеклас.'] = float(row[col_indices['Внеклас.']]) if pd.notna(row[col_indices['Внеклас.']]) else 0
                     except:
-                        teacher['Одарен.дети.'] = 0
+                        teacher['Внеклас.'] = 0
                 else:
-                    teacher['Одарен.дети.'] = 0
+                    teacher['Внеклас.'] = 0
                 
                 # Метод.
                 if 'Метод.' in col_indices:
@@ -169,8 +169,8 @@ def load_from_github():
             df.insert(0, '№', range(1, len(df) + 1))
             
             # Бағандарды реттеу
-            column_order = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштер', 
-                           'Результативность', 'Одарен.дети.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
+            column_order = ['№', 'ФИО', 'Предмет', 'Коэф', 'Ср.балл', 'Үштік', 
+                           'Результативность', 'Внеклас.', 'Метод.', 'Админ.рейтинг', 'Жалпы итог']
             for col in column_order:
                 if col not in df.columns:
                     df[col] = 0
@@ -273,7 +273,7 @@ def add_teacher():
             subject = st.text_input("Предмет *")
             coeff = st.number_input("Коэф.", value=1.0, step=0.1)
             avg_score = st.number_input("Ср.балл", value=4.0, step=0.1)
-            triplets = st.number_input("Үштер саны", value=0, step=1)
+            triplets = st.number_input("Үштік саны", value=0, step=1)
         with col2:
             extra = st.number_input("Внеклас. работа", value=0.0, step=0.5)
             method = st.number_input("Метод. деятельность", value=0.0, step=0.5)
