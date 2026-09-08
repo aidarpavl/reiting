@@ -117,20 +117,20 @@ def load_from_github():
                 # Үштік
                 if 'Үштік' in col_indices:
                     try:
-                        teacher['Үштік'] = float(row[col_indices['Үштік']]) if pd.notna(row[col_indices['Үштік']]) else 0
+                        teacher['Үштер'] = float(row[col_indices['Үштік']]) if pd.notna(row[col_indices['Үштік']]) else 0
                     except:
-                        teacher['Үштік'] = 0
+                        teacher['Үштер'] = 0
                 else:
-                    teacher['Үштік'] = 0
+                    teacher['Үштер'] = 0
                 
                 # Внеклас.
                 if 'Внеклас.' in col_indices:
                     try:
-                        teacher['Внеклас.'] = float(row[col_indices['Внеклас.']]) if pd.notna(row[col_indices['Внеклас.']]) else 0
+                        teacher['Одарен.дети.'] = float(row[col_indices['Внеклас.']]) if pd.notna(row[col_indices['Внеклас.']]) else 0
                     except:
-                        teacher['Внеклас.'] = 0
+                        teacher['Одарен.дети.'] = 0
                 else:
-                    teacher['Внеклас.'] = 0
+                    teacher['Одарен.дети.'] = 0
                 
                 # Метод.
                 if 'Метод.' in col_indices:
